@@ -3,16 +3,14 @@
 //  that would not be compiled in-line.
 
 #include "token.h"
-#include <string>
 
-ostream& operator<<( ostream &stream, Token &t)
+ostream& operator<<( ostream &stream, const Token &t)
 {
     if (t.isNull())
 		return stream << "(null)";
-	if (t.isVariable())
+	if (t.isVariable() || t.isOperator())
 		return stream << t.str;
 	if (t.isInteger())
-		return stream <<  t.value ;
-    else 
-		return stream <<  t.oper ;
+		return stream << t.value;
+	return stream << t.oper;
 }

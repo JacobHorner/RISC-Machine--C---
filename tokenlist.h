@@ -5,9 +5,14 @@
 // resembles a generic linked list, which may be used
 // either as a stack or a queue.
 
+#ifndef TOKENLIST
+#define TOKENLIST
+
 #include <iostream>
 using namespace std;
 #include "token.h"
+
+class ListIterator;		// defined below, but used as a return type in TokenList
 
 // Since this is a linked list, we actually need a linked list node.
 struct ListElement {
@@ -31,9 +36,9 @@ class TokenList  {
 	}
 
 	TokenList( const char str[] );	// or create initial list
-					// to appear in 'tokenlist.c'
-				
-	~TokenList()			// destructor 
+					// to appear in 'tokenlist.cpp'
+
+	~TokenList()			// destructor
 	{
 	    ListElement *remove;
 	    while ( (remove = head) != NULL)
@@ -42,7 +47,7 @@ class TokenList  {
 		delete remove;		// and deallocate this
 	    }
 	}
-	
+
 	void push_front(Token t);
 	void push_back(Token t);
 
@@ -71,9 +76,9 @@ class TokenList  {
 		return current->token;
 	}
 
-	Token first()
+	bool empty() const
 	{
-		return Token(head->token);
+		return head == NULL;
 	}
 
 	ListIterator begin();
@@ -92,8 +97,11 @@ private:
 		curr = le;
 	}
 public:
-	Token& token() const
+	const Token& token() const	// gives the null token once the list has ended
 	{
+		static const Token nullToken;
+		if (*curr == NULL)
+			return nullToken;
 		return (*curr)->token;
 	}
 	bool ended() const
@@ -110,3 +118,5 @@ public:
 		return list != other.list || curr != other.curr;
 	}
 };
+
+#endif

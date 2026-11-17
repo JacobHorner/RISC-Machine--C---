@@ -1,4 +1,8 @@
 // Variable Tree Header File
+// A binary search tree associating variable names with
+// their locations in the machine's stack memory.
+// A tree may have an outer tree, so that a function's parameters
+// can live in their own scope while still seeing global variables.
 
 #include <iostream>
 #include <string>
@@ -12,42 +16,50 @@ class TreeNode
     friend class VarTree;
     private:
 	string	name;		// variable name
-	int	value;		// variable value
-	int stackLocation; //location of the var in the stack
+	int stackLocation;	// location of the var in the stack
 	TreeNode *left,		// sub-tree for less than
 		 *right;	// sub-tree for greater than
 
-	TreeNode( string newName , int val , int sLoc )
+	TreeNode( string newName, int sLoc )
 	{
-	    name.assign( newName );	// get the name
-	    value = val;		// and the value
-		stackLocation = sLoc;
+	    name = newName;		// get the name
+		stackLocation = sLoc;	// and where it lives
 	    left = right = NULL;	// no children
 	}
-	friend ostream& operator<<(ostream&, TreeNode &); //adds treenode cout capability
 };
 
 class VarTree
 {
     private:
 	TreeNode *root;
-	int treeSize;
+	VarTree *outer;		// enclosing scope (NULL for the global scope)
+	int slotCount;		// stack slots handed out (only used in the global scope)
+
     public:
-        VarTree()
+	VarTree( VarTree *enclosing = NULL )
 	{
-	    root = NULL;	
-		treeSize = 0;
+	    root = NULL;
+		outer = enclosing;
+		slotCount = 0;
 	}
-	void assign( string, int, int );
-	int lookup( string, int);
-	int lookupPos(string, int);
-	int size();
+	~VarTree();
 
-    private:		
-	void recursiveAssign( TreeNode *&, string, int, int);
-	void recursiveLookup( TreeNode *&, string, int &, int & );
+	// Finds a variable in this scope or any enclosing one.
+	// Returns false if it has never been declared.
+	bool lookup( const string &name, int &stackLocation ) const;
 
-	friend ostream& operator<<(ostream&, VarTree &);
+	// Declares a variable in this scope and returns its new stack slot.
+	int declare( const string &name );
+
+	// Total stack slots needed by every scope.
+	int size() const;
+
+    private:
+	VarTree *global();
+	const VarTree *global() const;
+	static void destroy( TreeNode * );
+	VarTree( const VarTree & );		// not copyable
+	VarTree &operator=( const VarTree & );
 };
 
 #endif
