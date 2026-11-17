@@ -18,13 +18,13 @@ ostream& operator<<( ostream &stream, const Instruction &i )
 string Load::toString() const
 {
 	ostringstream convert;
-	convert << "T" << valueTemp << " = " << varOffset;  
+	convert << "T" << valueTemp << " = " << constant;
 	return convert.str();
 }
 
-void Load::execute(int temps[], int stack[], int &stackPointer, int &programCounter) const
+void Load::execute(int temps[], int[], int &, int &) const
 {
-	temps[valueTemp] = varOffset;
+	temps[valueTemp] = constant;
 }
 
 string Store::toString() const
@@ -34,9 +34,9 @@ string Store::toString() const
 	return convert.str();
 }
 
-void Store::execute(int temps[], int stack[], int &stackPointer, int &programCounter) const
+void Store::execute(int temps[], int stack[], int &stackPointer, int &) const
 {
-	stack[stackPointer] = temps[valueTemp];
+	stack[stackPointer + stackPos] = temps[valueTemp];
 }
 
 string LoadVar::toString() const
@@ -46,9 +46,9 @@ string LoadVar::toString() const
 	return convert.str();
 }
 
-void LoadVar::execute(int temps[], int stack[], int &stackPointer, int &programCounter) const
+void LoadVar::execute(int temps[], int stack[], int &stackPointer, int &) const
 {
-	temps[valueTemp] = stack[stackPointer];
+	temps[valueTemp] = stack[stackPointer + varOffset];
 }
 
 string LoadTemp::toString() const
@@ -58,7 +58,7 @@ string LoadTemp::toString() const
 	return convert.str();
 }
 
-void LoadTemp::execute(int temps[], int stack[], int &stackPointer, int &programCounter) const
+void LoadTemp::execute(int temps[], int[], int &, int &) const
 {
 	temps[valueTemp] = temps[registry2];
 }
@@ -71,9 +71,9 @@ string FalseCase::toString() const
 	return convert.str();
 }
 
-void FalseCase::execute(int temps[], int stack[], int &stackPointer, int &programCounter) const
+void FalseCase::execute(int temps[], int[], int &, int &programCounter) const
 {
-	if (temps[programCounter])
+	if (!temps[valueTemp])
 		programCounter = lineNumber;
 }
 
@@ -84,9 +84,9 @@ string TrueCase::toString() const
 	return convert.str();
 }
 
-void TrueCase::execute(int temps[], int stack[], int &stackPointer, int &programCounter) const
+void TrueCase::execute(int[], int[], int &, int &programCounter) const
 {
-	programCounter = lineNumber - 1;
+	programCounter = lineNumber;
 }
 
 
@@ -97,67 +97,74 @@ string Compute::toString() const
 	return convert.str();
 }
 
-void Add::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
+void Add::execute(int temps[], int[], int &, int &) const
 {
 	temps[valueTemp] = temps[argA1] + temps[argB1];
 }
 
-void Subtract::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
+void Subtract::execute(int temps[], int[], int &, int &) const
 {
 	temps[valueTemp] = temps[argA1] - temps[argB1];
 }
 
-void Multiply::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
+void Multiply::execute(int temps[], int[], int &, int &) const
 {
 	temps[valueTemp] = temps[argA1] * temps[argB1];
 }
 
-void Divide::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
+void Divide::execute(int temps[], int[], int &, int &) const
 {
-	temps[valueTemp] = temps[argA1] / temps[argB1];
-}
-
-void Modulo::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
-{
-	temps[valueTemp] = temps[argA1] % temps[argB1];
-}
-
-void Equals::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
-{
-	if (temps[argA1] == temps[argB1])
-		temps[programCounter+1] = false;
+	if (temps[argB1] == 0)
+	{
+		cout << "Error: division by zero (result set to 0)" << endl;
+		temps[valueTemp] = 0;
+	}
 	else
-		true;
+		temps[valueTemp] = temps[argA1] / temps[argB1];
 }
 
-void NotEquals::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
+void Modulo::execute(int temps[], int[], int &, int &) const
 {
-
-}
-
-void Less::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
-{
-	
-}
-
-void LessEqual::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
-{
-}
-
-void Greater::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
-{
-	if (temps[argA1] > temps[argB1])
-		temps[programCounter] = 0;
+	if (temps[argB1] == 0)
+	{
+		cout << "Error: modulo by zero (result set to 0)" << endl;
+		temps[valueTemp] = 0;
+	}
 	else
-		true;
+		temps[valueTemp] = temps[argA1] % temps[argB1];
 }
 
-void GreaterEqual::execute(int temps[], int stack[], int &stackCounter, int &programCounter) const
+void Equals::execute(int temps[], int[], int &, int &) const
 {
-	
+	temps[valueTemp] = (temps[argA1] == temps[argB1]);
 }
 
-void Print::execute(int temps[], int stack[], int &stackPointer, int &programCounter) const
+void NotEquals::execute(int temps[], int[], int &, int &) const
+{
+	temps[valueTemp] = (temps[argA1] != temps[argB1]);
+}
+
+void Less::execute(int temps[], int[], int &, int &) const
+{
+	temps[valueTemp] = (temps[argA1] < temps[argB1]);
+}
+
+void LessEqual::execute(int temps[], int[], int &, int &) const
+{
+	temps[valueTemp] = (temps[argA1] <= temps[argB1]);
+}
+
+void Greater::execute(int temps[], int[], int &, int &) const
+{
+	temps[valueTemp] = (temps[argA1] > temps[argB1]);
+}
+
+void GreaterEqual::execute(int temps[], int[], int &, int &) const
+{
+	temps[valueTemp] = (temps[argA1] >= temps[argB1]);
+}
+
+void Print::execute(int temps[], int[], int &, int &) const
 {
 	cout << temps[valueTemp] << endl;
 }

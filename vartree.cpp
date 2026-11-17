@@ -1,84 +1,90 @@
 // Variable Tree Implementation File
 // This is a simple binary search tree associating variables
-// with integer values.
+// with their stack locations.
 #include <iostream>
 #include <string>
 using namespace std;
 
 #include "vartree.h"
 
-//  recursiveAssign
-//  A recursive tree-traversal function to assign to a variable.
-void VarTree::recursiveAssign(TreeNode *&root, string name, int value, int loc)
+VarTree::~VarTree()
 {
-	TreeNode *tempNode = root;
-
-	if (root == NULL)
-	{
-		root = new TreeNode(name, value, loc);
-	}
-	else if (tempNode->name != name)
-	{
-		if (name < tempNode->name)
-			recursiveAssign(tempNode->left, name, value, loc);
-		else if (name > tempNode->name)
-			recursiveAssign(tempNode->right, name, value, loc);
-	}
-	else
-	{
-		tempNode->value = value;
-		treeSize++;
-	}
-		
+	destroy(root);
 }
 
-//  assign
-//  Assigns a value to a variable.
-void VarTree::assign( string name, int value , int loc )
+void VarTree::destroy(TreeNode *node)
 {
-    recursiveAssign( root, name, value, loc );
+	if (node != NULL)
+	{
+		destroy(node->left);
+		destroy(node->right);
+		delete node;
+	}
 }
 
-//  recursiveLookup
-//  A recursive tree-traversal function to search for a variable.
-//  If the variable does not exist, it is created with a value of 0.
-void VarTree::recursiveLookup( TreeNode *&root, string name, int &value, int &pos )
+VarTree *VarTree::global()
 {
-	if (root == NULL)
-	{
-		assign(name, 0, pos);
-	}
+	VarTree *scope = this;
+	while (scope->outer != NULL)
+		scope = scope->outer;
+	return scope;
+}
 
-	if (root->name != name)
-		if (name < root->name)
-			recursiveLookup(root->left, name, value, pos);
-		else
-			recursiveLookup(root->right, name, value, pos);
-	else
-	{
-		value = root->value;
-		pos = root->stackLocation;
-	}
+const VarTree *VarTree::global() const
+{
+	const VarTree *scope = this;
+	while (scope->outer != NULL)
+		scope = scope->outer;
+	return scope;
 }
 
 //  lookup
-//  Searches for a variable to get its value
-//  If the variable does not yet exist, it is created.
-int VarTree::lookup( string name, int pos )
+//  Searches this scope, then the enclosing scopes, for a variable.
+bool VarTree::lookup( const string &name, int &stackLocation ) const
 {
-    int value;
-    recursiveLookup( root, name, value, pos);
-    return value;
+	TreeNode *node = root;
+	while (node != NULL)
+	{
+		if (name < node->name)
+			node = node->left;
+		else if (name > node->name)
+			node = node->right;
+		else
+		{
+			stackLocation = node->stackLocation;
+			return true;
+		}
+	}
+	if (outer != NULL)
+		return outer->lookup(name, stackLocation);
+	return false;
 }
 
-int VarTree::lookupPos(string name, int pos)
+//  declare
+//  Adds a variable to this scope, giving it the next free stack slot.
+//  Slots are counted in the global scope so no two variables share one.
+int VarTree::declare( const string &name )
 {
-	int value;
-	recursiveLookup(root, name, value, pos);
-	return pos;
+	int slot = global()->slotCount++;
+
+	TreeNode **link = &root;
+	while (*link != NULL)
+	{
+		if (name < (*link)->name)
+			link = &(*link)->left;
+		else if (name > (*link)->name)
+			link = &(*link)->right;
+		else
+		{
+			(*link)->stackLocation = slot;	// redeclared in this scope
+			return slot;
+		}
+	}
+	*link = new TreeNode(name, slot);
+	return slot;
 }
 
-int VarTree::size( )
+int VarTree::size() const
 {
-	return treeSize;
+	return global()->slotCount;
 }

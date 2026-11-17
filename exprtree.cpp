@@ -1,4 +1,4 @@
-// Expression Tree 
+// Expression Tree
 // These functions manage an expression tree that describes
 // arithmetic expressions using integer variables and values.
 // Some functions construct a tree from a character string that
@@ -10,16 +10,50 @@ using namespace std;
 #include "exprtree.h"
 #include "tokenlist.h"
 
-void equalsNode(ExprNode *&, ListIterator &); // convert equals
 void condNode(ExprNode *&, ListIterator &);	// convert conditional
 void boolNode(ExprNode *&, ListIterator &);	// convert boolean operators
-void sumNode(ExprNode *&, ListIterator &);	// convert sum 
+void sumNode(ExprNode *&, ListIterator &);	// convert sum
 void prodNode(ExprNode *&, ListIterator &);	// convert product
 void factorNode(ExprNode *&, ListIterator &);	// convert factor
 
 ostream& operator<<( ostream &stream, const ExprNode &e )
 {
     return stream << e.toString();
+}
+
+// Describes a token for an error message
+static string describe(const Token &t)
+{
+	if (t.isNull())
+		return "end of line";
+	ostringstream convert;
+	convert << "'" << t << "'";
+	return convert.str();
+}
+
+// Throws a syntax error unless the condition holds
+static void expect(bool condition, const string &message, const Token &found)
+{
+	if (!condition)
+		throw runtime_error(message + ", found " + describe(found));
+}
+
+void emit(Instruction *prog[], int &pEnd, Instruction *instr)
+{
+	if (pEnd >= MAX_CODE)
+	{
+		delete instr;
+		throw runtime_error("program is too long for the machine's code memory");
+	}
+	prog[pEnd++] = instr;
+}
+
+// Hands out the next temporary register
+static int newRegister(int &progCounter)
+{
+	if (progCounter >= MAX_TEMPS)
+		throw runtime_error("expression needs too many temporary registers");
+	return progCounter++;
 }
 
 string Value::toString() const
@@ -29,10 +63,9 @@ string Value::toString() const
     return convert.str();	// and extract its string equivalent
 }
 
-void Value::compile(VarTree &v, FunctionDef &f, Instruction *prog[], int &pBegin, int &pEnd, int &progCounter) const
+void Value::compile(VarTree &, FunctionDef &, Instruction *prog[], int &, int &pEnd, int &progCounter) const
 {
-	prog[pEnd++] = new Load(progCounter, value);
-	progCounter++;
+	emit(prog, pEnd, new Load(newRegister(progCounter), value));
 }
 
 string Variable::toString() const
@@ -40,20 +73,14 @@ string Variable::toString() const
     return name;
 }
 
-void Variable::compile(VarTree &v, FunctionDef &f, Instruction *prog[], int &pBegin, int &pEnd, int &progCounter) const
+// Reading a variable loads it from its stack slot.  A variable that
+// has never been assigned is created on first use, holding 0.
+void Variable::compile(VarTree &v, FunctionDef &, Instruction *prog[], int &, int &pEnd, int &progCounter) const
 {
-	static int stackCounter = 0;
-	if (v.lookup(name, stackCounter) == 0)
-	{
-		prog[pEnd++] = new Store(progCounter, stackCounter);
-		v.assign(name, progCounter, stackCounter);
-		stackCounter++;
-	}
-	else
-	{
-		prog[pEnd++] = new LoadVar(progCounter, v.lookupPos(name, stackCounter));
-		progCounter++;
-	}
+	int slot;
+	if (!v.lookup(name, slot))
+		slot = v.declare(name);
+	emit(prog, pEnd, new LoadVar(newRegister(progCounter), slot));
 }
 
 string Operation::toString() const
@@ -61,169 +88,139 @@ string Operation::toString() const
 	return "(" + left->toString() + " " + oper + " " + right->toString() + ")";
 }
 
-void Operation::compile(VarTree &v, FunctionDef &f, Instruction *prog[], int &pBegin, int &pEnd, int &progCounter) const //slightly modified from the previous function which created an expression tree.
-{																														 //Now this function builds instruction lines using the order of operations already 
-	int temp1 = 0;																										 //present in the compile function.
-	int temp2 = 0;
+// Builds instruction lines using the order of operations already
+// present in the expression tree.
+void Operation::compile(VarTree &v, FunctionDef &f, Instruction *prog[], int &pBegin, int &pEnd, int &progCounter) const
+{
 	if (oper == "=")
 	{
+		// assignment: compute the right side, then store it into the variable.
+		// The value stays in its register, so  a = 3  also prints 3.
+		const Variable *target = dynamic_cast<const Variable *>(left);
+		if (target == NULL)
+			throw runtime_error("left side of '=' must be a variable");
+
 		right->compile(v, f, prog, pBegin, pEnd, progCounter);
-		temp1 = progCounter - 1;
-		left->compile(v, f, prog, pBegin, pEnd, temp1);
+		int slot;
+		if (!v.lookup(target->getName(), slot))
+			slot = v.declare(target->getName());
+		emit(prog, pEnd, new Store(progCounter - 1, slot));
+		return;
 	}
+
+	left->compile(v, f, prog, pBegin, pEnd, progCounter);
+	int temp1 = progCounter - 1;
+	right->compile(v, f, prog, pBegin, pEnd, progCounter);
+	int temp2 = progCounter - 1;
+	int result = newRegister(progCounter);
+
+	Instruction *instr;
+	if      (oper == "+")  instr = new Add(result, temp1, temp2);
+	else if (oper == "-")  instr = new Subtract(result, temp1, temp2);
+	else if (oper == "*")  instr = new Multiply(result, temp1, temp2);
+	else if (oper == "/")  instr = new Divide(result, temp1, temp2);
+	else if (oper == "%")  instr = new Modulo(result, temp1, temp2);
+	else if (oper == "==") instr = new Equals(result, temp1, temp2);	//support for conditional operators
+	else if (oper == "!=") instr = new NotEquals(result, temp1, temp2);
+	else if (oper == "<")  instr = new Less(result, temp1, temp2);
+	else if (oper == "<=") instr = new LessEqual(result, temp1, temp2);
+	else if (oper == ">")  instr = new Greater(result, temp1, temp2);
+	else if (oper == ">=") instr = new GreaterEqual(result, temp1, temp2);
 	else
-	{
-		switch (oper[0])
-		{
-		case '+':
-			left->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp1 = progCounter - 1;
-			right->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp2 = progCounter - 1;
-			prog[pEnd++] = new Add(progCounter, temp1, temp2);
-			progCounter++;
-			break;
+		throw runtime_error("unknown operator '" + oper + "'");
 
-		case '-': left->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp1 = progCounter - 1;
-			right->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp2 = progCounter - 1;
-			prog[pEnd++] = new Subtract(progCounter, temp1, temp2);
-			progCounter++;
-			break;
-
-		case '*': left->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp1 = progCounter - 1;
-			right->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp2 = progCounter - 1;
-			prog[pEnd++] = new Multiply(progCounter, temp1, temp2);
-			progCounter++;
-			break;
-
-		case '/': left->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp1 = progCounter - 1;
-			right->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp2 = progCounter - 1;
-			prog[pEnd++] = new Divide(progCounter, temp1, temp2);
-			progCounter++;
-			break;
-
-		case '%': left->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp1 = progCounter - 1;
-			right->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp2 = progCounter - 1;
-			prog[pEnd++] = new Modulo(progCounter, temp1, temp2);
-			progCounter++;
-			break;
-
-		case '=': left->compile(v, f, prog, pBegin, pEnd, progCounter); //support for conditional operators
-			temp1 = progCounter - 1;
-			right->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp2 = progCounter - 1;
-			prog[pEnd++] = new Equals(progCounter, temp1, temp2);
-			progCounter++;
-			break;
-
-		case '!': left->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp1 = progCounter - 1;
-			right->compile(v, f, prog, pBegin, pEnd, progCounter);
-			temp2 = progCounter - 1;
-			prog[pEnd++] = new NotEquals(progCounter, temp1, temp2);
-			progCounter++;
-			break;
-
-		case '<':
-			if (oper == "<")
-			{
-				left->compile(v, f, prog, pBegin, pEnd, progCounter);
-				temp1 = progCounter - 1;
-				right->compile(v, f, prog, pBegin, pEnd, progCounter);
-				temp2 = progCounter - 1;
-				prog[pEnd++] = new Less(progCounter, temp1, temp2);
-				progCounter++;
-			}
-			else
-			{
-				left->compile(v, f, prog, pBegin, pEnd, progCounter);
-				temp1 = progCounter - 1;
-				right->compile(v, f, prog, pBegin, pEnd, progCounter);
-				temp2 = progCounter - 1;
-				prog[pEnd++] = new LessEqual(progCounter, temp1, temp2);
-				progCounter++;
-			}
-			break;
-
-		case '>':
-			if (oper == ">")
-			{
-				left->compile(v, f, prog, pBegin, pEnd, progCounter);
-				temp1 = progCounter - 1;
-				right->compile(v, f, prog, pBegin, pEnd, progCounter);
-				temp2 = progCounter - 1;
-				prog[pEnd++] = new Greater(progCounter, temp1, temp2);
-				progCounter++;
-			}
-			else
-			{
-				left->compile(v, f, prog, pBegin, pEnd, progCounter);
-				temp1 = progCounter - 1;
-				right->compile(v, f, prog, pBegin, pEnd, progCounter);
-				temp2 = progCounter - 1;
-				prog[pEnd++] = new GreaterEqual(progCounter, temp1, temp2);
-				progCounter++;
-			}
-			break;
-		}
-	}
+	emit(prog, pEnd, instr);
 }
 
 string Conditional::toString() const
 {
-	ostringstream convert;
-	convert << test;
-	return convert.str();
+	return "(" + test->toString() + " ? " + trueCase->toString() + " : " + falseCase->toString() + ")";
 }
 
-// To compile, looks at test, if it returns 1 (true), return the compile of trueCase
-// otherwise, return the compile of falseCase
-void Conditional::compile(VarTree &v, FunctionDef &f, Instruction *prog[], int &pBegin, int &pEnd, int &progCounter) const //attempt at a compile for conditional with several variables to hold important
-{																														   //registers to build conditional instructions with.
-	int tempFalseStart = 0;
-	int tempTrueStart = 0;
-	int tempProgCounter = 0;
-	int tempProgCounter2 = 0;
-	int tempTrueGoTo = 0;
-	bool cond = true;
-
-	test->compile(v, f, prog, pBegin, pEnd, progCounter);
-	tempProgCounter = progCounter - 1;
-	tempFalseStart = pEnd++;
-	trueCase->compile(v, f, prog, pBegin, pEnd, progCounter);
-	tempTrueGoTo = pEnd++;
-	tempTrueStart = pEnd++;
-	falseCase->compile(v, f, prog, pBegin, pEnd, progCounter);
-	tempProgCounter2 = progCounter - 1;
-	prog[tempTrueGoTo] = new LoadTemp(tempProgCounter2, tempProgCounter + 1);
-	prog[tempFalseStart] = new FalseCase(tempProgCounter, tempTrueStart + 1);
-	prog[tempTrueStart] = new TrueCase(tempProgCounter, pEnd);
-}
-
-string Functional::toString() const //support for function not yet implemented
+// Compiles to:
+//         <test>                      -> Ttest
+//         Go to FALSE if Ttest false
+//         <true case>                 -> Ttrue
+//         Tresult = Ttrue
+//         Go to END
+// FALSE:  <false case>                -> Tfalse
+//         Tresult = Tfalse
+// END:
+// The jump targets are not known until the cases are compiled,
+// so those instructions are filled in afterwards.
+void Conditional::compile(VarTree &v, FunctionDef &f, Instruction *prog[], int &pBegin, int &pEnd, int &progCounter) const
 {
-	//string retVal = name + "( " + argument[0]->toString();
-	//for (int i = 1; i < argCount; i++)
-	//	retVal = retVal + ", " + argument[i]->toString();
-	//return retVal + " )";
-	return "";
+	test->compile(v, f, prog, pBegin, pEnd, progCounter);
+	int testReg = progCounter - 1;
+	int branchLine = pEnd;
+	emit(prog, pEnd, NULL);			// placeholder for the branch
+
+	trueCase->compile(v, f, prog, pBegin, pEnd, progCounter);
+	int trueReg = progCounter - 1;
+	int trueMoveLine = pEnd;
+	emit(prog, pEnd, NULL);			// placeholder: Tresult = Ttrue
+	int gotoEndLine = pEnd;
+	emit(prog, pEnd, NULL);			// placeholder: jump past the false case
+
+	int falseStart = pEnd;
+	falseCase->compile(v, f, prog, pBegin, pEnd, progCounter);
+	int falseReg = progCounter - 1;
+
+	// the result register is allocated last, so it is progCounter-1 for our caller
+	int result = newRegister(progCounter);
+	emit(prog, pEnd, new LoadTemp(result, falseReg));
+
+	prog[branchLine] = new FalseCase(testReg, falseStart);
+	prog[trueMoveLine] = new LoadTemp(result, trueReg);
+	prog[gotoEndLine] = new TrueCase(result, pEnd);
 }
 
+string Functional::toString() const
+{
+	string retVal = name + "(";
+	for (int i = 0; i < elements; i++)
+	{
+		if (i > 0)
+			retVal += ", ";
+		retVal += parameters[i]->toString();
+	}
+	return retVal + ")";
+}
+
+// Function calls are expanded inline: each argument is computed and
+// stored into a fresh stack slot for its parameter, and then the
+// function body is compiled with those parameters in scope.
+// Because of this, a function may not call itself (directly or indirectly).
 void Functional::compile(VarTree &v, FunctionDef &f, Instruction *prog[], int &pBegin, int &pEnd, int &progCounter) const
 {
-	VarTree newCall;
-	//Functional fd = [name];
-	//for (int i = 0; i < argCount; i++)
-	//	newCall.assign(fd.parameter[i], argument[i]->evaluate(v, f));
-	//return fd.functionBody->evaluate(newCall, f);
+	FunctionDef::iterator it = f.find(name);
+	if (it == f.end())
+		throw runtime_error("unknown function '" + name + "'");
+
+	FunDef &fd = it->second;
+	if (fd.paramCount != elements)
+	{
+		ostringstream msg;
+		msg << "'" << name << "' takes " << fd.paramCount << " argument(s), but was given " << elements;
+		throw runtime_error(msg.str());
+	}
+	if (fd.expanding)
+		throw runtime_error("recursive call to '" + name + "' is not supported (functions are expanded inline)");
+
+	int argRegs[10];
+	for (int i = 0; i < elements; i++)
+	{
+		parameters[i]->compile(v, f, prog, pBegin, pEnd, progCounter);
+		argRegs[i] = progCounter - 1;
+	}
+
+	VarTree locals(&v);		// parameters, with the caller's variables visible behind them
+	for (int i = 0; i < elements; i++)
+		emit(prog, pEnd, new Store(argRegs[i], locals.declare(fd.parameter[i])));
+
+	fd.expanding = true;
+	fd.functionBody->compile(locals, f, prog, pBegin, pEnd, progCounter);
+	fd.expanding = false;
 }
 
 void equalsNode(ExprNode *&root, ListIterator &infix)
@@ -232,66 +229,62 @@ void equalsNode(ExprNode *&root, ListIterator &infix)
 
 	condNode(tempLeft, infix);	//creates the expression tree for the left child
 
-	if (!infix.ended() && infix.token().tokenName() == "=")
+	if (infix.token().isOperator() && infix.token().tokenName() == "=")
 	{
+		if (dynamic_cast<Variable *>(tempLeft) == NULL)
+		{
+			delete tempLeft;
+			throw runtime_error("left side of '=' must be a variable");
+		}
 		infix.advance();
-		condNode(tempRight, infix);	//creates the expression tree for the right child
+		equalsNode(tempRight, infix);	// right side; also allows  a = b = 3
 		tempLeft = new Operation(tempLeft, "=", tempRight);	// create the assignment node
 	}
 
 	root = tempLeft;
 }
 
-// condNode creates the conditional nodes
+// condNode creates the conditional nodes:  test ? trueCase : falseCase
 void condNode(ExprNode *&root, ListIterator &infix)
 {
 	//test, t, and f are temporary pointers
 	ExprNode *test, *t, *f;
-	string oper;		// possible operation
 
 	boolNode(test, infix);	//creates the expression tree for the test
 
-	if (!infix.ended())			// make sure there is more data
-		oper = infix.token().tokenName();
-
-	while (oper == "?")
+	if (infix.token().isOperator() && infix.token().tokenName() == "?")
 	{
 		infix.advance();
-		boolNode(t, infix);	// create true case expression tree
+		condNode(t, infix);	// create true case expression tree
+		expect(infix.token().tokenName() == ":", "expected ':' in conditional", infix.token());
 		infix.advance();
-		boolNode(f, infix);	// create false case expression tree
+		condNode(f, infix);	// create false case expression tree (a ? b : c ? d : e nests to the right)
 		test = new Conditional(test, t, f);	// create the conditional node
-
-		if (infix.ended())			// no more operators
-			oper = "";
-		else
-			oper = infix.token().tokenName();
 	}
 
 	root = test;
+}
+
+static bool isRelational(const Token &t)
+{
+	string oper = t.tokenName();
+	return t.isOperator() &&
+		(oper == ">" || oper == "<" || oper == ">=" || oper == "<=" || oper == "==" || oper == "!=");
 }
 
 // boolNode creates the boolean operators nodes in the expression tree
 void boolNode(ExprNode *&root, ListIterator &infix)
 {
 	ExprNode *tempLeft, *tempRight;
-	string oper;			// possible operation
 
 	sumNode(tempLeft, infix);	//creates the expression tree for the left child
 
-	if (!infix.ended())			// make sure there is more data
-		oper = infix.token().tokenName();
-
-	while (oper == ">" || oper == "<" || oper == ">=" || oper == "<=" || oper == "==" || oper == "!=")
+	while (isRelational(infix.token()))
 	{
+		string oper = infix.token().tokenName();
 		infix.advance();
 		sumNode(tempRight, infix);	//creates the expression tree for the right child
 		tempLeft = new Operation(tempLeft, oper, tempRight);	// create the boolean operator node
-
-		if (infix.ended())			// no more operators
-			oper = "";
-		else
-			oper = infix.token().tokenName();
 	}
 
 	root = tempLeft;
@@ -300,30 +293,23 @@ void boolNode(ExprNode *&root, ListIterator &infix)
 void sumNode(ExprNode *&root, ListIterator &infix)
 {
 	ExprNode *tempLeft, *tempRight;
-	string oper;			// possible operation
 
-	if (infix.token().tokenName() == "-")	// if negative
+	if (infix.token().isOperator() && infix.token().tokenName() == "-")	// if negative
 	{
 		infix.advance();			//    go past the negative sign
-		prodNode(tempRight, infix);	//       build a tree 
+		prodNode(tempRight, infix);	//       build a tree
 		tempLeft = new Operation(new Value(0), "-", tempRight);
 	}
 	else
 		prodNode(tempLeft, infix);	//creates the expression tree for the left child
 
-	if (!infix.ended())			// make sure there is more data
-		oper = infix.token().tokenName();
-
-	while (oper == "+" || oper == "-")
+	while (infix.token().isOperator() &&
+		(infix.token().tokenName() == "+" || infix.token().tokenName() == "-"))
 	{
+		string oper = infix.token().tokenName();
 		infix.advance();
 		prodNode(tempRight, infix);	//creates the expression tree for the right child
 		tempLeft = new Operation(tempLeft, oper, tempRight);	// create sum node
-
-		if (infix.ended())			// no more operators
-			oper = "";
-		else
-			oper = infix.token().tokenName();
 	}
 
 	root = tempLeft;
@@ -332,31 +318,24 @@ void sumNode(ExprNode *&root, ListIterator &infix)
 void prodNode(ExprNode *&root, ListIterator &infix)
 {
 	ExprNode *tempLeft, *tempRight;
-	string oper;		// possible operation
 
 	factorNode(tempLeft, infix);	//creates the expression tree for the left child
 
-	if (!infix.ended())			// make sure there is more data
-		oper = infix.token().tokenName();
-
-	while (oper == "*" || oper == "/" || oper == "%")
+	while (infix.token().isOperator() &&
+		(infix.token().tokenName() == "*" || infix.token().tokenName() == "/" || infix.token().tokenName() == "%"))
 	{
+		string oper = infix.token().tokenName();
 		infix.advance();
 		factorNode(tempRight, infix);	//creates the expression tree for the right child
 		tempLeft = new Operation(tempLeft, oper, tempRight);	// create product node
-
-		if (infix.ended())			// no more operators
-			oper = "";
-		else
-			oper = infix.token().tokenName();
 	}
 
 	root = tempLeft;
 }
 
+// A factor is a number, a variable, a function call, or a parenthesized expression
 void factorNode(ExprNode *&root, ListIterator &infix)
 {
-	Token y = infix.token();
 	if (infix.token().isInteger())
 	{
 		root = new Value(infix.token().integerValue());	// create integer node
@@ -364,37 +343,42 @@ void factorNode(ExprNode *&root, ListIterator &infix)
 	}
 	else if (infix.token().isVariable())
 	{
-		char oper = ' ';
-		string name = infix.token().tokenName();	// create name for possible function
-		root = new Variable(infix.token().tokenName());	// create variable node
-		infix.advance();	// get past variable
+		string name = infix.token().tokenName();	// variable or function name
+		infix.advance();	// get past the name
 
-		if (infix.ended())			// no more operators
-			oper = ' ';
-		else
-			oper = infix.token().tokenChar();
-
-		if (oper == '(')	// check if variable is function name or not
+		if (infix.token().tokenChar() != '(')	// check if variable is function name or not
 		{
-			int i = 0;	// counter for number of parameters
-			ExprNode *parameters[10];	// array of exprnodes (pointers to parameters)
-			infix.advance();
-
-			while (infix.token().tokenChar() != ')')
-			{
-				equalsNode(root, infix);	// collects parameter as exprnode and ends at a comma
-				parameters[i] = root;	// assign exprnode to parameter
-				i++;	// add 1 to parameter counter
-				if (infix.token().tokenChar() == ',')
-					infix.advance();	// assume comma and get past it
-			}
-			root = new Functional(name, i, parameters);
+			root = new Variable(name);	// create variable node
+			return;
 		}
+
+		int i = 0;	// counter for number of parameters
+		ExprNode *parameters[10];	// array of exprnodes (pointers to parameters)
+		infix.advance();	// get past (
+
+		if (infix.token().tokenChar() != ')')
+		{
+			while (true)
+			{
+				expect(i < 10, "too many arguments to '" + name + "' (at most 10)", infix.token());
+				equalsNode(parameters[i], infix);	// collects parameter as exprnode
+				i++;	// add 1 to parameter counter
+				if (infix.token().tokenChar() != ',')
+					break;
+				infix.advance();	// get past the comma
+			}
+		}
+		expect(infix.token().tokenChar() == ')', "expected ')' after arguments to '" + name + "'", infix.token());
+		infix.advance();	// get past )
+		root = new Functional(name, i, parameters);
+	}
+	else if (infix.token().tokenChar() == '(')
+	{
+		infix.advance();		// go past (
+		equalsNode(root, infix);
+		expect(infix.token().tokenChar() == ')', "expected ')'", infix.token());
+		infix.advance();		// go past )
 	}
 	else
-	{
-		infix.advance();		// go past assumed (
-		equalsNode(root, infix);
-		infix.advance();		// go past assumed )
-	}
+		expect(false, "expected a number, variable, or '('", infix.token());
 }

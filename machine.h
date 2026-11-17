@@ -6,6 +6,7 @@
 // The machine is expected to have a pre-allocated stack space
 // for named variables and an arbitrarily long list of temporary
 // registers, both represented by integer arrays here (to hold values).
+// Named variables live at stack[stackPointer + offset].
 // The machine also has a separate memory area holding all of the
 // instructions defined below. Most of these instructions are also immutable.
 
@@ -17,6 +18,10 @@ using namespace std;
 #ifndef INSTRUCTION
 #define INSTRUCTION
 
+const int MAX_CODE  = 1000;	// instruction memory
+const int MAX_STACK = 100;	// stack slots for named variables
+const int MAX_TEMPS = 100;	// temporary registers (reused for each line)
+
 class Instruction
 {
    protected:
@@ -27,35 +32,29 @@ class Instruction
 	    valueTemp = temp;
 	}
    public:																		//Had to output this way to avoid errors, per Roger's advice
+	virtual ~Instruction() {}
 	friend ostream& operator<<( ostream&, const Instruction & );
 	virtual string toString() const = 0; // facilitates << operator
 	virtual void execute(int[], int[], int &, int &) const {}
 };
 
 
-class Load : public Instruction													//Loads values into temp registers
+class Load : public Instruction													//Loads a constant into a temp register
 {
 protected:
-	int varOffset;
+	int constant;
 public:
-	Load(int reg, int varOff) : Instruction(reg), varOffset(varOff) 
-	{
-		varOffset = varOff;
-	}
+	Load(int reg, int value) : Instruction(reg), constant(value) {}
 	string toString() const;
 	void execute(int[], int[], int &, int &) const;
 };
 
-class Store : public Instruction												//Stores into variable stack
+class Store : public Instruction												//Stores a temp register into the variable stack
 {
 protected:
-	int stackPos;  //position in stack
-	int registry;  //temp register position
+	int stackPos;  //position in stack, relative to the stack pointer
 public:
-	Store(int reg, int pos) : Instruction(reg), stackPos(pos)
-	{
-		stackPos = pos;
-	}
+	Store(int reg, int pos) : Instruction(reg), stackPos(pos) {}
 	string toString() const;
 	void execute(int[], int[], int &, int &) const;
 };
@@ -65,54 +64,43 @@ class LoadVar : public Instruction												//Loads variables into temp regist
 protected:
 	int varOffset;
 public:
-	LoadVar(int reg, int varOff) : Instruction(reg), varOffset(varOff)
-	{
-		varOffset = varOff;
-	}
+	LoadVar(int reg, int varOff) : Instruction(reg), varOffset(varOff) {}
 	string toString() const;
 	void execute(int[], int[], int &, int &) const;
 };
 
-class LoadTemp : public Instruction												//Loads a value into a temp register
+class LoadTemp : public Instruction												//Copies one temp register into another
 {
 protected:
 	int registry2;
 public:
-	LoadTemp(int reg, int reg2) : Instruction(reg), registry2(reg2)
-	{
-		registry2 = reg2;
-	}
+	LoadTemp(int reg, int reg2) : Instruction(reg), registry2(reg2) {}
 	string toString() const;
 	void execute(int[], int[], int &, int &) const;
 };
 
 
 
-class Condition : public Instruction					//support for the test for the conditional
+class Condition : public Instruction					//support for the branches of the conditional
 {
 protected:
-	int lineNumber;
-	Condition(int reg, int lineN) : Instruction(reg), lineNumber(lineN)
-	{
-		lineNumber = lineN;
-	}
+	int lineNumber;		// instruction to jump to
+	Condition(int reg, int lineN) : Instruction(reg), lineNumber(lineN) {}
 	virtual string toString() const = 0;
 	virtual void execute(int[], int[], int &, int &) const {}
 };
 
-class FalseCase : public Condition						//support for the false case of the conditional
+class FalseCase : public Condition						//jumps to lineNumber if register valueTemp is false (0)
 {
 public:
-	bool condition;
 	string toString() const;
 	void execute(int[], int[], int &, int &) const;
 	FalseCase(int reg, int lineN) : Condition(reg, lineN){}
 };
 
-class TrueCase : public Condition					//support for the true case of the conditional
+class TrueCase : public Condition					//unconditional jump past the false case
 {
 public:
-	bool condition;
 	string toString() const;
 	void execute(int[], int[], int &, int &) const;
 	TrueCase(int reg, int lineN) : Condition(reg, lineN){}
@@ -120,7 +108,7 @@ public:
 
 
 
-class Compute : public Instruction					//base for the computing iof the instructions
+class Compute : public Instruction					//base for the computing of the instructions
 {
 protected:
 	int argA1, argB1;
@@ -177,6 +165,7 @@ public:
 		Compute(result, argA, argB, "%") { }
 };
 
+// The relational operators put 1 (true) or 0 (false) in their result register
 class Equals : public Compute
 {
 public:
@@ -236,6 +225,6 @@ public:
 	}
 	void execute(int[], int[], int &, int &) const;
 	Print(int temp) : Instruction(temp) { }
-};	 
+};
 
 #endif

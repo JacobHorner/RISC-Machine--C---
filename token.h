@@ -6,87 +6,87 @@
 
 // Provides some helpful functionality for understanding tokens
 #include <iostream>
-#include <stdlib.h>
-#include <ctype.h>
+#include <string>
 using namespace std;
- 
+
 // Here is a definition of the token itself:
 class Token {
-   
-    private:
-	bool    isInt;		// to identify the token type later
-	bool	isVar;		// Is variable
-	bool	isOper;		// Is an operator in conditional expression
-	int		value;		// value for an integer token
-	char	oper;		// character for an operator token
-	string	str;		// Handles the "names" of inputted variables.
-
 
     public:
-	Token(char c)		//constructors 
-	{			
-	    oper = c;     
-	    isInt = false;
-		isVar = false;
+	enum Kind { NONE, INTEGER, NAME, OPERATOR, PUNCT };
+
+    private:
+	Kind	kind;		// to identify the token type later
+	int		value;		// value for an integer token
+	char	oper;		// character for a punctuation token: ( ) ,
+	string	str;		// name of a variable/function, or an operator such as "<="
+
+    public:
+	Token(char c)		// punctuation token
+	{
+	    kind = PUNCT;
+	    oper = c;
 	    value = 0;		// initialize unused value
 	}
 
-	Token(int i)
+	Token(int i)		// integer token
 	{
+	    kind = INTEGER;
 	    value = i;
-	    isInt = true;
-		isVar = false;
 	    oper = 0;		// initialize unused value
 	}
 
-	Token(string s) //String token constructor for (multi-character) variables
+	Token(string s, Kind k = NAME)	// name (default) or operator token
 	{
+		kind = k;
 		str = s;
-		isInt = false;
-		isVar = true;
+		value = 0;
 		oper = 0;
 	}
 
-	Token()			// default constructor
+	Token()			// default constructor: the null token
 	{
+	    kind = NONE;
 	    value = 0;
 	    oper = 0;
-	    isInt = false;
-		isVar = false;
 	}
 
-	
 	bool isNull() const
 	{
-	    return !isInt && oper==0 && !isVar && !isOper;
+	    return kind == NONE;
 	}
 
 	bool isInteger() const
 	{
-	    return isInt;
+	    return kind == INTEGER;
 	}
 
 	int integerValue() const
 	{
 	    return value;
 	}
-	
+
 	char tokenChar() const
 	{
 	    return oper;
 	}
-	
+
 	bool isVariable() const
 	{
-		return isVar;
+		return kind == NAME;
 	}
 
-	string tokenName() const
+	bool isOperator() const
+	{
+		return kind == OPERATOR;
+	}
+
+	string tokenName() const	// name or operator text ("" for other kinds)
 	{
 		return str;
 	}
 
-	friend ostream& operator <<( ostream& stream, Token &t);
+	friend ostream& operator <<( ostream& stream, const Token &t);
 };
 
 #endif
